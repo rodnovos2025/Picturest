@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Пазл-картина</title>
+    <style>
+        body { text-align: center; font-family: Arial, sans-serif; background: #111; color: white; overflow: hidden; }
+        .start-btn {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            padding: 20px 40px; font-size: 24px; cursor: pointer;
+            border: none; outline: none;
+            background: rgba(0, 255, 255, 0.2);
+            color: cyan; border-radius: 15px;
+            box-shadow: 0 0 10px cyan;
+            transition: 0.3s;
+            backdrop-filter: blur(10px);
+        }
+        .start-btn:hover { box-shadow: 0 0 20px cyan; background: rgba(0, 255, 255, 0.3); }
+        
+        #game-container { display: none; padding: 10px; }
+        #puzzle-container {
+            display: grid; gap: 2px; 
+            margin: auto; 
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            max-width: 90vw; max-height: 80vh; 
+        }
+        .piece { cursor: pointer; background-size: cover; background-repeat: no-repeat; }
+        #puzzle-container.solved { box-shadow: 0 0 20px 5px cyan; border-radius: 10px; }
+        
+        #timer {
+            position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%);
+            font-size: 24px; color: lime; font-weight: bold;
+        }
+        
+        #info { display: none; margin-top: 20px; font-size: 20px; text-align: center; opacity: 0; transition: opacity 1s; }
+        #info a { color: cyan; text-decoration: none; font-size: 22px; }
+        #info a:hover { text-shadow: 0 0 10px cyan; }
+        #info img { width: 24px; vertical-align: middle; margin-left: 10px; }
+        .restart-btn {
+            position: absolute; bottom: 60px; left: 50%; transform: translateX(-50%);
+            padding: 10px 20px; font-size: 18px; cursor: pointer;
+            border: none; outline: none;
+            background: rgba(0, 255, 255, 0.2);
+            color: cyan; border-radius: 10px;
+            box-shadow: 0 0 10px cyan;
+            transition: 0.3s;
+            backdrop-filter: blur(10px);
+        }
+        .restart-btn:hover { box-shadow: 0 0 20px cyan; background: rgba(0, 255, 255, 0.3); }
+    </style>
+</head>
+<body>
+
+    <button class="start-btn" onclick="startGame()">Играть</button>
+    <div id="game-container">
+        <div id="puzzle-container"></div>
+        <div id="info"></div>
+        <div id="timer">Время: 0 сек</div>
+    </div>
+
+    <script>
+        let originalPositions = [];
+        let shuffledPositions = [];
+        let selectedPieces = [];
+        let imgSrc = "";
+        let artTitle = "";
+        let artUrl = "";
+        let gridSize = 4;
+        let timerInterval;
+        let seconds = 0;
+
+        // Функция для получения случайной картины из категории "Картины по алфавиту"
+        async function getRandomArtwork() {
+            const categoryUrl = "https://ru.wikipedia.org/w/api.php?action=query&format=json&list=categorymembers&cmtitle=Категория:Картины_по_алфавиту&cmlimit=500&origin=*";
+            let allArticles = [];
+            let continueQuery = true;
+            let continueUrl = categoryUrl;
+
+            // Собираем все статьи через пагинацию
+            while (continueQuery) {
+                const categoryResponse = await fetch(continueUrl);
+                const categoryData = await categoryResponse.json();
+                const articles = categoryData.query.categorymembers;
+                
+                if (articles.length > 0) {
+                    allArticles = allArticles.concat(articles);
+                }
+
+                // Если есть продолжение, продолжаем запрос
+                if (categoryData.continue) {
+                    continueUrl = categoryUrl + "&cmcontinue=" + categoryData.continue.cmcontinue;
+                } else {
+                    continueQuery = false;
+                }
+            }
+
+            if (allArticles.length === 0) return null;
+
+            // Выбираем случайную картину из всех картин
+            const randomArticle = allArticles[Math.floor(Math.random() * allArticles.length)];
+            artTitle = randomArticle.title;
+            artUrl = `https://ru.wikipedia.org/wiki/${encodeURIComponent(artTitle)}`;
+
+            // Получаем изображение для выбранной картины
+            const imageUrl = `https://ru.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(artTitle)}&prop=pageimages&format=json&pithumbsize=2000&origin=*`;
+            const imageResponse = await fetch(imageUrl);
+            const imageData = await imageResponse.json();
+            const pages = imageData.query.pages;
+            const page = Object.values(pages)[0];
+
+            if (page.thumbnail) {
+                return page.thumbnail.source; // Возвращаем URL изображения
+            }
+
+            return null;
+        }
+
+        // Функция для создания пазла
+        function createPuzzle(image) {
+            imgSrc = image;
+            originalPositions = [];
+            shuffledPositions = [];
+            selectedPieces = [];
+            document.getElementById("puzzle-container").classList.remove("solved");
+            document.getElementById("info").style.display = "none";
+            document.getElementById("timer").innerText = "Время: 0 сек";
+            seconds = 0;
+
+            let container = document.getElementById("puzzle-container");
+            container.innerHTML = "";
+
+            let containerSize = Math.min(window.innerWidth * 0.9, window.innerHeight * 0.8);
+            container.style.width = `${containerSize}px`;
+            container.style.height = `${containerSize}px`;
+            container.style.gridTemplateColumns = `repeat(${gridSize}, 1fr)`;
+            container.style.gridTemplateRows = `repeat(${gridSize}, 1fr)`;
+
+            for (let row = 0; row < gridSize; row++) {
+                for (let col = 0; col < gridSize; col++) {
+                    let index = row * gridSize + col;
+                    originalPositions.push(index);
+                    shuffledPositions.push(index);
+                }
+            }
+
+            shuffledPositions.sort(() => Math.random() - 0.5);
+
+            shuffledPositions.forEach((index, i) => {
+                let row = Math.floor(index / gridSize);
+                let col = index % gridSize;
+                let piece = document.createElement("div");
+                piece.classList.add("piece");
+                piece.style.width = `${containerSize / gridSize}px`;
+                piece.style.height = `${containerSize / gridSize}px`;
+                piece.style.backgroundImage = `url(${imgSrc})`;
+                piece.style.backgroundSize = `${containerSize}px ${containerSize}px`;
+                piece.style.backgroundPosition = `-${col * (containerSize / gridSize)}px -${row * (containerSize / gridSize)}px`;
+                piece.dataset.index = i;
+                piece.onclick = () => selectPiece(i);
+                container.appendChild(piece);
+            });
+
+            startTimer();
+        }
+
+        function selectPiece(index) {
+            if (selectedPieces.includes(index)) return;
+            selectedPieces.push(index);
+
+            if (selectedPieces.length === 2) {
+                swapPieces(selectedPieces[0], selectedPieces[1]);
+                selectedPieces = [];
+                checkWin();
+            }
+        }
+
+        function swapPieces(index1, index2) {
+            let container = document.getElementById("puzzle-container");
+            let pieces = container.children;
+            [pieces[index1].style.backgroundPosition, pieces[index2].style.backgroundPosition] = 
+                [pieces[index2].style.backgroundPosition, pieces[index1].style.backgroundPosition];
+
+            [shuffledPositions[index1], shuffledPositions[index2]] = 
+                [shuffledPositions[index2], shuffledPositions[index1]];
+        }
+
+        function checkWin() {
+            if (shuffledPositions.every((val, i) => val === originalPositions[i])) {
+                document.getElementById("puzzle-container").classList.add("solved");
+                clearInterval(timerInterval);
+                showInfo();
+            }
+        }
+
+        function showInfo() {
+            let info = document.getElementById("info");
+            info.innerHTML = `
+                <h2><a href="${artUrl}" target="_blank">${artTitle}</a></h2>
+                <button class="restart-btn" onclick="startGame()">Играть снова</button>
+            `;
+            info.style.display = "block";
+            setTimeout(() => { info.style.opacity = "1"; }, 100);
+        }
+
+        function startTimer() {
+            clearInterval(timerInterval);
+            seconds = 0;
+            timerInterval = setInterval(() => {
+                seconds++;
+                document.getElementById("timer").innerText = `Время: ${seconds} сек`;
+            }, 1000);
+        }
+
+        async function startGame() {
+            document.querySelector(".start-btn").style.display = "none";
+            document.getElementById("game-container").style.display = "block";
+
+            // Получаем случайное изображение для пазла
+            const image = await getRandomArtwork();
+            if (image) {
+                createPuzzle(image);
+            } else {
+                alert("Не удалось загрузить изображение. Попробуйте снова.");
+            }
+        }
+    </script>
+</body>
+</html>
